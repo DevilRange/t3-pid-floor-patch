@@ -60,6 +60,7 @@ C10_FLOAT         = 0x41200000  # IEEE-754 bits of 10.0f (older builds l32r this
 ENTRY_OPCODE      = 0x36        # first byte of the Xtensa `entry` (function prologue)
 FLOOR_FIELD       = 8           # floor byte lives at  PID-object + 8
 CEIL_FIELD        = 9           # ceiling byte lives at PID-object + 9
+SETPOINT_MAX_GAP  = 0x30        # CH setpoint sits just below the PID object (0x28..0x2c seen in 2.0..3.0.0)
 
 
 # ---- ESP32 image container -------------------------------------------------
@@ -370,12 +371,13 @@ def threshold_candidates(code, base_va, floor_byte):
 
 def find_threshold(code, base_va, pidoff, log) -> Threshold:
     # The CH-enable threshold compares the SETPOINT, which lives just below the PID
-    # sub-object. Of all 10.0-vs-field compares, pick the one whose field is the
-    # largest offset still below the PID object; require it unique.
+    # sub-object. Of the 10.0-vs-field compares within SETPOINT_MAX_GAP below it, pick
+    # the closest; require it unique. (The window matters: if the real compare is
+    # missing, the next 10.0 compare further down is unrelated code — never touch it.)
     cands = threshold_candidates(code, base_va, pidoff + FLOOR_FIELD)
-    below = [t for t in cands if t.setpoint_off < pidoff]
+    below = [t for t in cands if pidoff - SETPOINT_MAX_GAP <= t.setpoint_off < pidoff]
     if not below:
-        sys.exit(f"off-threshold: found no 10.0-vs-setpoint compare below the PID object "
+        sys.exit(f"off-threshold: found no 10.0-vs-setpoint compare just below the PID object "
                  f"({len(cands)} candidate(s)) — refusing (would short-cycle). Patch it manually.")
     top = max(t.setpoint_off for t in below)
     winners = [t for t in below if t.setpoint_off == top]
@@ -447,6 +449,9 @@ def main():
         f"image_len {img.img_len:#x} hash={img.hashed}")
 
     setter = find_floor(code, img.code_va, log)
+    if all(s.imm != 10 for s in setter.floor_sites):    # stock always has the 10s; ours has none
+        sys.exit(f"this firmware is already patched (floor={setter.floor_sites[0].imm}). To change the "
+                 f"floor, patch a stock image instead (python download_fw.py).")
     thr = find_threshold(code, img.code_va, setter.pidoff, log)
 
     out = patch_image(data, img, setter, thr, args.floor)
