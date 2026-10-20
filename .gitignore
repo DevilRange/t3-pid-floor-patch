@@ -1,0 +1,6 @@
+# firmware images are DIYLESS's — never commit them (and device reads carry your MAC)
+*.bin
+*.elf
+# python
+__pycache__/
+*.pyc
