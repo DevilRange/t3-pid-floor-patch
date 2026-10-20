@@ -45,6 +45,13 @@ A couple of things that make this safe to try: on a stock unit the ESP32's secur
 encryption are both off, so a normal re-flash works and can be undone. And your Wi-Fi and settings
 live in a separate area of memory that none of this touches.
 
+## Why not use the new Hybrid algorithm?
+
+Mainly because I don't have an outside temperature sensor, but also because to me it looks a little
+bit over-engineered. I appreciate the thought that was put into it, but the supervisory layer, the
+interactions between the learners, they all add-up to a lot of possible edge-cases which need testing.
+For now, I like the PI algorithm, it's transparent, predictable and easy to understand.
+
 ## Which firmware it works with
 
 It's for the OpenTherm Thermostat 3 firmware (the images DIYLESS publishes). I tested it on the 12
