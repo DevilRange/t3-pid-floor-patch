@@ -38,11 +38,14 @@ XTENSA 101 (just enough to read the decoders below)
       olt.s  b, fX, fY   set bool b = (fX < fY)                 (the threshold compare)
 
     python patch_fw_auto.py in.bin out.bin [--floor 35] [-v]
+  in.bin = an app image (DIYLESS download) OR a full flash backup (read-flash 0 ALL); for a
+  backup we take the app slot the thermostat actually boots, per its otadata record.
 """
 import argparse
 import hashlib
 import struct
 import sys
+import zlib
 from typing import NamedTuple, Optional, List
 
 # ---- tunables (all heuristics in one place) --------------------------------
@@ -67,6 +70,24 @@ class Image(NamedTuple):
     cksum_off: int     # file offset of the image's XOR-checksum byte
     img_len:   int     # total image length (segments + checksum + optional SHA-256)
     hashed:    bool    # whether a 32-byte SHA-256 is appended
+
+
+# stock partition table: two app slots (ota_0 / ota_1) + the otadata "which slot boots" record
+APP_SLOTS = (0x10000, 0x3e0000)
+SLOT_LEN  = 0x3d0000
+OTADATA   = 0xe000
+
+
+def active_slot(flash: bytes) -> int:
+    """Slot the bootloader starts: newest valid otadata entry of the two copies; blank = slot 0."""
+    best = 0
+    for off in (OTADATA, OTADATA + 0x1000):
+        seq, = struct.unpack_from("<I", flash, off)
+        state, crc = struct.unpack_from("<II", flash, off + 24)
+        valid = seq != 0xFFFFFFFF and crc == zlib.crc32(flash[off:off + 4], 0xFFFFFFFF)
+        if valid and state not in (3, 4):           # skip INVALID / ABORTED images
+            best = max(best, seq)
+    return (best - 1) % len(APP_SLOTS) if best else 0
 
 
 def parse_image(data: bytes) -> Image:
@@ -413,6 +434,13 @@ def main():
     log = print if args.verbose else (lambda *a: None)
 
     data = bytearray(open(args.src, "rb").read())
+    if len(data) > SLOT_LEN:                        # full flash backup, not a single app image
+        slot = active_slot(data)
+        print(f"full backup: thermostat boots slot {slot} ({APP_SLOTS[slot]:#x}), patching that one")
+        data = data[APP_SLOTS[slot]:APP_SLOTS[slot] + SLOT_LEN]
+    if struct.unpack_from("<I", data, 0x20)[0] == 0xABCD5432:   # esp_app_desc_t
+        tag, date = (bytes(data[o:o + 32]).split(b"\0")[0].decode(errors="replace") for o in (0x30, 0x80))
+        print(f"firmware build: {tag} ({date})")
     img = parse_image(data)
     code = bytes(data[img.code_foff:img.code_foff + img.code_len])
     log(f"IROM: va {img.code_va:#x}, file {img.code_foff:#x}, len {img.code_len:#x}; "

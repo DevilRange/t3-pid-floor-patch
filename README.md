@@ -93,12 +93,9 @@ somewhere safe.
 
 You have two choices. Pick whichever suits you.
 
-**Option A, patch the firmware already on your thermostat (your own dump).** This keeps the exact
-build that's running on your unit. You read it off the device and patch that copy:
-
-```
-esptool --port COMx read-flash 0x10000 0x3d0000 firmware.bin
-```
+**Option A, patch the firmware already on your thermostat.** Nothing to do here: the `backup.bin`
+from step 1 already contains it. The patch script picks out the exact firmware your unit is running
+(see step 3).
 
 **Option B, download a fresh copy from DIYLESS.** Use this if you'd rather put on a specific
 published version, or just prefer a clean image. There's a little picker that lists the available
@@ -112,36 +109,41 @@ It shows the latest five, lets you page back to older ones, and saves the file a
 `firmware-<version>.bin` (it also prints the exact next command). To grab one without the menu:
 `python download_fw.py 3.0.0`.
 
-**The difference, in plain terms:** the two files are nearly identical. Your dump is your unit's own
-copy of whatever version it's on; the download is a clean copy of a version you pick. The thermostat
-reads its real network ID from a hardware fuse either way, so for normal use it makes no difference.
-(Small technical note for Option A: the thermostat keeps two firmware slots internally and this
-reads the main one. If you've been updating over the air and want to be certain which you're
-grabbing, Option B lets you choose a known version instead.)
-
-Either way you now have a firmware file to patch.
+**The difference, in plain terms:** the two are nearly identical. Option A is your unit's own copy
+of whatever version it's on; Option B is a clean copy of a version you pick. The thermostat reads its
+real network ID from a hardware fuse either way, so for normal use it makes no difference.
 
 ### Step 3. Patch it and check it
 
 ```
-python patch_fw_auto.py firmware.bin patched.bin --floor 35
+python patch_fw_auto.py backup.bin patched.bin --floor 35
 python -m esptool --chip esp32s3 image-info patched.bin
 ```
 
-Change `35` to whatever minimum you want. If you used Option B, use the `firmware-<version>.bin`
-name the downloader saved instead of `firmware.bin`. In the second command's output you want to see
+For Option B, use the `firmware-<version>.bin` the downloader saved instead of `backup.bin`. Change
+`35` to whatever minimum you want.
+
+The script prints the firmware build it found (for example `t3-2.2.3-400-g461171cd (Aug 23 2026)`,
+which is 3.0.0). Given a full backup, it also tells you which of the two firmware slots your
+thermostat boots from; that's the one it patches. In the second command's output you want to see
 the word valid next to both Checksum and Validation hash.
 
 ### Step 4. Flash it on
 
-Grab one small boot file (it just tells the thermostat which slot to start), then write both:
-
 ```
-curl -s -o boot_app0.bin "https://diyless.com/firmware/opentherm-thermostat3/3.0.0/boot_app0.bin"
-esptool --port COMx write-flash 0x10000 patched.bin 0xe000 boot_app0.bin
+esptool --port COMx erase-region 0xe000 0x2000
+esptool --port COMx write-flash 0x10000 patched.bin
 ```
 
-The thermostat reboots by itself. Your Wi-Fi and settings are still there. You should see the
+<sub>Why two commands: the thermostat has two firmware slots (at 0x10000 and 0x3e0000). Over-the-air
+updates alternate between them, and a small "boot record" (otadata, 8 KB at 0xe000) remembers which
+one to start. We always write the patched firmware to the first slot, so the first command clears that
+record. With it blank, the thermostat starts the first slot. Without this step, a unit that last
+updated into the second slot would keep running the old firmware and ignore the patch. DIYLESS's own
+web flasher does the same thing by writing a `boot_app0.bin` file, which is just 8 KB of that blank
+record. The other slot isn't touched, and Wi-Fi and settings live elsewhere.</sub>
+
+The thermostat reboots by itself after the second command. Your Wi-Fi and settings are still there. You should see the
 integral settle at 35 instead of 10, and the boiler should still switch off cleanly once the room
 is up to temperature.
 
