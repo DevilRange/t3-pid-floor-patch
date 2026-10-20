@@ -263,6 +263,11 @@ def inspect_callers(code, base_va, setter_entry):
         floor = nearest_movi_before(code, i, 11, FLOOR_SCAN_BACK)      # a11 = 2nd arg = floor
         if not (floor and CALLER_FLOOR_RANGE[0] <= floor[1] <= CALLER_FLOOR_RANGE[1]):
             continue                                                  # not a "pass a constant floor" call
+        k = floor[0]                                                  # the call must be a real instruction:
+        while k < i:                                                  # stepping from the movi lands on it
+            k += instr_len(code, k)                                   # (2.1.0 has a stray 0x65 byte inside a
+        if k != i:                                                    # movi that decodes as a call to the setter)
+            continue
         floor_sites.append(FloorSite(floor[0], floor[1], floor[2]))
         base = nearest_movi_before(code, i, 10, PIDOFF_SCAN_BACK)      # a10 = 1st arg = controller+PIDOFF
         if base and PIDOFF_RANGE[0] <= base[1] <= PIDOFF_RANGE[1]:
